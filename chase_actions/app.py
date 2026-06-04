@@ -15,6 +15,20 @@ def get_sheet_data():
     sheet = client.open_by_key(os.environ["GOOGLE_SHEET_ID"]).sheet1
     return sheet.get_all_records()
 
+KNOWN_NAMES = [
+    "Aparna Ganesan", "Robert Eyres", "Laura Reile", "Alex Caudill",
+    "Jamie Sims", "Laerke Rasmussen", "Alexa Stein", "Davine Ittoo",
+    "Januka Jeyakumar", "Martyna Ore"
+]
+
+def split_owners(owners_raw):
+    """Split a cell containing multiple names into a list of individual names."""
+    for name in KNOWN_NAMES:
+        if name in owners_raw:
+            owners_raw = owners_raw.replace(name, f"|{name}|")
+    parts = [p.strip() for p in owners_raw.split("|") if p.strip() in KNOWN_NAMES]
+    return parts if parts else [owners_raw.strip()]
+
 def get_slack_user_id(slack_client, full_name):
     response = slack_client.users_list()
     for user in response["members"]:
@@ -48,20 +62,24 @@ def chase_actions():
     not_found = []
 
     for row in open_actions:
-        owner = row.get("Owner", "").strip()
-        if not owner:
+        owners_raw = row.get("Owner", "").strip()
+        if not owners_raw:
             continue
 
-        user_id = get_slack_user_id(slack_client, owner)
-        if not user_id:
-            not_found.append(owner)
-            continue
+        # Split multiple owners (handles "Alex Caudill Jamie Sims" style entries)
+        owners = split_owners(owners_raw)
 
-        try:
-            slack_client.chat_postMessage(channel=user_id, text=build_message(row))
-            chased.append(owner)
-        except SlackApiError:
-            not_found.append(owner)
+        for owner in owners:
+            user_id = get_slack_user_id(slack_client, owner)
+            if not user_id:
+                not_found.append(owner)
+                continue
+
+            try:
+                slack_client.chat_postMessage(channel=user_id, text=build_message(row))
+                chased.append(owner)
+            except SlackApiError:
+                not_found.append(owner)
 
     summary = f":white_check_mark: Chased {len(chased)} action(s)."
     if not_found:
